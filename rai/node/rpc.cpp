@@ -4122,20 +4122,23 @@ void rai::rpc_connection::parse_connection ()
 			this_l->node->background ([this_l]() {
 				auto start (std::chrono::steady_clock::now ());
 				auto version (this_l->request.version ());
-				auto response_handler ([this_l, version, start](boost::property_tree::ptree const & tree_a) {
+
+				auto prepare_head ([this_l, version]() {
+					this_l->res.version (version);
+					this_l->res.result(boost::beast::http::status::ok);
+					this_l->res.set (boost::beast::http::field::content_type, "application/json");
+					this_l->res.set (boost::beast::http::field::access_control_allow_origin, "*");
+					this_l->res.set (boost::beast::http::field::access_control_allow_headers, "Accept, Accept-Language, Content-Language, Content-Type");
+				});
+
+				auto response_handler ([this_l, prepare_head, start](boost::property_tree::ptree const & tree_a) {
+					prepare_head ();
 					std::stringstream ostream;
 					boost::property_tree::write_json (ostream, tree_a);
 					ostream.flush ();
 					auto body (ostream.str ());
-					this_l->res.set ("Content-Type", "application/json");
-					this_l->res.set ("Access-Control-Allow-Origin", "*");
-					this_l->res.set ("Access-Control-Allow-Headers", "Accept, Accept-Language, Content-Language, Content-Type");
-					this_l->res.set ("Connection", "close");
-					this_l->res.result (boost::beast::http::status::ok);
 					this_l->res.body () = body;
-					this_l->res.version (version);
 					this_l->res.prepare_payload ();
-					//boost::beast::http::prepare (this_l->res);
 					boost::beast::http::async_write (this_l->socket, this_l->res, [this_l](boost::system::error_code const & ec, size_t bytes_transferred) {
 					});
 					if (this_l->node->config.logging.log_rpc ())
@@ -4143,14 +4146,29 @@ void rai::rpc_connection::parse_connection ()
 						BOOST_LOG (this_l->node->log) << boost::str (boost::format ("RPC request %2% completed in: %1% microseconds") % std::chrono::duration_cast<std::chrono::microseconds> (std::chrono::steady_clock::now () - start).count () % boost::io::group (std::hex, std::showbase, reinterpret_cast<uintptr_t> (this_l.get ())));
 					}
 				});
-				if (this_l->request.method () == boost::beast::http::verb::post)
-				{
-					auto handler (std::make_shared<rai::rpc_handler> (*this_l->node, this_l->rpc, this_l->request.body (), response_handler));
-					handler->process_request ();
-				}
-				else
-				{
-					error_response (response_handler, "Can only POST requests");
+
+				auto method (this_l->request.method ());
+				switch (method) {
+					case boost::beast::http::verb::post:
+					{
+						auto handler (std::make_shared<rai::rpc_handler> (*this_l->node, this_l->rpc, this_l->request.body (), response_handler));
+						handler->process_request ();
+						break;
+					}
+					case boost::beast::http::verb::options:
+					{
+						prepare_head ();
+						this_l->res.prepare_payload ();
+						boost::beast::http::async_write (this_l->socket, this_l->res, [this_l] (boost::system::error_code const & ec, size_t bytes_transferred)
+						{
+						});
+						break;
+					}
+					default:
+					{
+						error_response (response_handler, "Can only POST requests");
+						break;
+					}
 				}
 			});
 		}
