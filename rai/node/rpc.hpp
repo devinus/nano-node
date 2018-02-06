@@ -40,11 +40,13 @@ class rpc_config
 public:
 	rpc_config ();
 	rpc_config (bool);
+	rpc_config (bool, std::string &);
 	void serialize_json (boost::property_tree::ptree &) const;
 	bool deserialize_json (boost::property_tree::ptree const &);
 	boost::asio::ip::address_v6 address;
 	uint16_t port;
 	bool enable_control;
+	std::string & authorization_token;
 	uint64_t frontier_request_limit;
 	uint64_t chain_request_limit;
 	rpc_secure_config secure;

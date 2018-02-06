@@ -1451,7 +1451,7 @@ TEST (rpc, version)
 	auto allowed_origin (headers.at ("Access-Control-Allow-Origin"));
 	auto allowed_headers (headers.at ("Access-Control-Allow-Headers"));
 	ASSERT_EQ ("*", allowed_origin);
-	ASSERT_EQ ("Accept, Accept-Language, Content-Language, Content-Type", allowed_headers);
+	ASSERT_EQ ("Accept, Accept-Language, Content-Language, Content-Type, Authorization", allowed_headers);
 }
 
 TEST (rpc, work_generate)

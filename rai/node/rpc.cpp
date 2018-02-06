@@ -7,6 +7,8 @@
 
 #include <ed25519-donna/ed25519.h>
 
+std::string default_authorization_token ("");
+
 #ifdef RAIBLOCKS_SECURE_RPC
 #include <rai/node/rpc_secure.hpp>
 #endif
@@ -52,6 +54,7 @@ rai::rpc_config::rpc_config () :
 address (boost::asio::ip::address_v6::loopback ()),
 port (rai::rpc::rpc_port),
 enable_control (false),
+authorization_token (default_authorization_token),
 frontier_request_limit (16384),
 chain_request_limit (16384)
 {
@@ -61,6 +64,17 @@ rai::rpc_config::rpc_config (bool enable_control_a) :
 address (boost::asio::ip::address_v6::loopback ()),
 port (rai::rpc::rpc_port),
 enable_control (enable_control_a),
+authorization_token (default_authorization_token),
+frontier_request_limit (16384),
+chain_request_limit (16384)
+{
+}
+
+rai::rpc_config::rpc_config (bool enable_control_a, std::string & authentication_token_a) :
+address (boost::asio::ip::address_v6::loopback ()),
+port (rai::rpc::rpc_port),
+enable_control (enable_control_a),
+authorization_token (authentication_token_a),
 frontier_request_limit (16384),
 chain_request_limit (16384)
 {
@@ -71,6 +85,7 @@ void rai::rpc_config::serialize_json (boost::property_tree::ptree & tree_a) cons
 	tree_a.put ("address", address.to_string ());
 	tree_a.put ("port", std::to_string (port));
 	tree_a.put ("enable_control", enable_control);
+	tree_a.put ("authorization_token", authorization_token);
 	tree_a.put ("frontier_request_limit", frontier_request_limit);
 	tree_a.put ("chain_request_limit", chain_request_limit);
 }
@@ -91,6 +106,7 @@ bool rai::rpc_config::deserialize_json (boost::property_tree::ptree const & tree
 			auto address_l (tree_a.get<std::string> ("address"));
 			auto port_l (tree_a.get<std::string> ("port"));
 			enable_control = tree_a.get<bool> ("enable_control");
+			authorization_token = tree_a.get<std::string> ("authorization_token");
 			auto frontier_request_limit_l (tree_a.get<std::string> ("frontier_request_limit"));
 			auto chain_request_limit_l (tree_a.get<std::string> ("chain_request_limit"));
 			try
@@ -4361,10 +4377,10 @@ void rai::rpc_connection::write_result (std::string body, unsigned version)
 {
 	if (!responded.test_and_set ())
 	{
-		res.set ("Content-Type", "application/json");
-		res.set ("Access-Control-Allow-Origin", "*");
-		res.set ("Access-Control-Allow-Headers", "Accept, Accept-Language, Content-Language, Content-Type");
-		res.set ("Connection", "close");
+		res.set (boost::beast::http::field::content_type, "application/json");
+		res.set (boost::beast::http::field::access_control_allow_origin, "*");
+		res.set (boost::beast::http::field::access_control_allow_headers, "Accept, Accept-Language, Content-Language, Content-Type, Authorization");
+		res.set (boost::beast::http::field::connection, "close");
 		res.result (boost::beast::http::status::ok);
 		res.body () = body;
 		res.version (version);
@@ -4386,8 +4402,17 @@ void rai::rpc_connection::read ()
 			this_l->node->background ([this_l]() {
 				auto start (std::chrono::steady_clock::now ());
 				auto version (this_l->request.version ());
-				auto response_handler ([this_l, version, start](boost::property_tree::ptree const & tree_a) {
 
+				auto prepare_head ([this_l, version]() {
+					this_l->res.version (version);
+					this_l->res.result(boost::beast::http::status::ok);
+					this_l->res.set (boost::beast::http::field::content_type, "application/json");
+					this_l->res.set (boost::beast::http::field::access_control_allow_origin, "*");
+					this_l->res.set (boost::beast::http::field::access_control_allow_headers, "Accept, Accept-Language, Content-Language, Content-Type, Authorization");
+					this_l->res.set (boost::beast::http::field::connection, "close");
+				});
+
+				auto response_handler ([this_l, version, start](boost::property_tree::ptree const & tree_a) {
 					std::stringstream ostream;
 					boost::property_tree::write_json (ostream, tree_a);
 					ostream.flush ();
@@ -4401,14 +4426,29 @@ void rai::rpc_connection::read ()
 						BOOST_LOG (this_l->node->log) << boost::str (boost::format ("RPC request %2% completed in: %1% microseconds") % std::chrono::duration_cast<std::chrono::microseconds> (std::chrono::steady_clock::now () - start).count () % boost::io::group (std::hex, std::showbase, reinterpret_cast<uintptr_t> (this_l.get ())));
 					}
 				});
-				if (this_l->request.method () == boost::beast::http::verb::post)
+
+				auto method = this_l->request.method ();
+				switch (method)
 				{
-					auto handler (std::make_shared<rai::rpc_handler> (*this_l->node, this_l->rpc, this_l->request.body (), response_handler));
-					handler->process_request ();
-				}
-				else
-				{
-					error_response (response_handler, "Can only POST requests");
+					case boost::beast::http::verb::post:
+					{
+						auto handler (std::make_shared<rai::rpc_handler> (*this_l->node, this_l->rpc, this_l->request.body (), response_handler));
+						handler->process_request ();
+						break;
+					}
+					case boost::beast::http::verb::options:
+					{
+						prepare_head ();
+						this_l->res.prepare_payload ();
+						boost::beast::http::async_write (this_l->socket, this_l->res, [this_l](boost::system::error_code const & ec, size_t bytes_transferred) {
+						});
+						break;
+					}
+					default:
+					{
+						error_response (response_handler, "Can only POST requests");
+						break;
+					}
 				}
 			});
 		}
