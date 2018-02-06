@@ -7,10 +7,13 @@
 
 #include <ed25519-donna/ed25519.h>
 
+std::string default_authorization_token ("");
+
 rai::rpc_config::rpc_config () :
 address (boost::asio::ip::address_v6::loopback ()),
 port (rai::rpc::rpc_port),
 enable_control (false),
+authorization_token (default_authorization_token),
 frontier_request_limit (16384),
 chain_request_limit (16384)
 {
@@ -20,6 +23,17 @@ rai::rpc_config::rpc_config (bool enable_control_a) :
 address (boost::asio::ip::address_v6::loopback ()),
 port (rai::rpc::rpc_port),
 enable_control (enable_control_a),
+authorization_token (default_authorization_token),
+frontier_request_limit (16384),
+chain_request_limit (16384)
+{
+}
+
+rai::rpc_config::rpc_config (bool enable_control_a, std::string & authentication_token_a) :
+address (boost::asio::ip::address_v6::loopback ()),
+port (rai::rpc::rpc_port),
+enable_control (enable_control_a),
+authorization_token (authentication_token_a),
 frontier_request_limit (16384),
 chain_request_limit (16384)
 {
@@ -30,6 +44,7 @@ void rai::rpc_config::serialize_json (boost::property_tree::ptree & tree_a) cons
 	tree_a.put ("address", address.to_string ());
 	tree_a.put ("port", std::to_string (port));
 	tree_a.put ("enable_control", enable_control);
+	tree_a.put ("authorization_token", authorization_token);
 	tree_a.put ("frontier_request_limit", frontier_request_limit);
 	tree_a.put ("chain_request_limit", chain_request_limit);
 }
@@ -42,6 +57,7 @@ bool rai::rpc_config::deserialize_json (boost::property_tree::ptree const & tree
 		auto address_l (tree_a.get<std::string> ("address"));
 		auto port_l (tree_a.get<std::string> ("port"));
 		enable_control = tree_a.get<bool> ("enable_control");
+		authorization_token = tree_a.get<std::string> ("authorization_token");
 		auto frontier_request_limit_l (tree_a.get<std::string> ("frontier_request_limit"));
 		auto chain_request_limit_l (tree_a.get<std::string> ("chain_request_limit"));
 		try
@@ -4125,7 +4141,7 @@ void rai::rpc_connection::parse_connection ()
 					this_l->res.result(boost::beast::http::status::ok);
 					this_l->res.set (boost::beast::http::field::content_type, "application/json");
 					this_l->res.set (boost::beast::http::field::access_control_allow_origin, "*");
-					this_l->res.set (boost::beast::http::field::access_control_allow_headers, "Accept, Accept-Language, Content-Language, Content-Type");
+					this_l->res.set (boost::beast::http::field::access_control_allow_headers, "Accept, Accept-Language, Content-Language, Content-Type, Authorization");
 				});
 
 				auto response_handler ([this_l, prepare_head, start](boost::property_tree::ptree const & tree_a) {
@@ -4148,6 +4164,16 @@ void rai::rpc_connection::parse_connection ()
 				switch (method) {
 					case boost::beast::http::verb::post:
 					{
+						auto authorization_token (this_l->rpc.config.authorization_token);
+						if (!authorization_token.empty ()) {
+							auto headers (this_l->request.base ());
+							auto authorization (headers["Authorization"]);
+							if (authorization != std::string("Bearer " + authorization_token)) {
+								error_response (response_handler, "Invalid Authorization header");
+								break;
+							}
+						}
+
 						auto handler (std::make_shared<rai::rpc_handler> (*this_l->node, this_l->rpc, this_l->request.body (), response_handler));
 						handler->process_request ();
 						break;
