@@ -37,4 +37,5 @@ after_build:
 artifacts:
 - path: node.zip
   name: nano_node
-
+- path: rai_node.exe
+  name: rai_node
