@@ -32,10 +32,7 @@ build:
   project: rai_node.vcxproj
   verbosity: quiet
 after_build:
-- ps: Invoke-WebRequest -Uri https://download.microsoft.com/download/5/7/b/57b2947c-7221-4f33-b35e-2fc78cb10df4/vc_redist.x64.exe -OutFile .\vc_redist.x64.exe
-- cmd: 7z a nano.zip %APPVEYOR_BUILD_FOLDER%\Release\*.exe
+- cmd: 7z a -tzip nano.zip %APPVEYOR_BUILD_FOLDER%
 artifacts:
-- path: node.zip
+- path: nano.zip
   name: nano_node
-- path: rai_node.exe
-  name: rai_node
